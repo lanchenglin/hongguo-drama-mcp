@@ -22,7 +22,7 @@
 | 参数 | AI 的处理规则 |
 | --- | --- |
 | RepoDir | 优先使用用户指定目录或已有正确仓库；否则在当前用户可写的本地磁盘创建独立目录，例如 `%LOCALAPPDATA%\Programs\hongguo-drama-mcp`。不要把源码和 node_modules 放在 SMB 上。 |
-| DownloadRoot | 优先保留已有有效配置；再读取用户明确指定的共享目录。只读查看已有 `Get-SmbMapping` / `Get-SmbConnection` 可以辅助判断，但不得把任意发现的共享当成授权保存目标。 |
+| DownloadRoot | 优先保留已有有效共享配置，再使用用户明确指定的共享目录；两者均没有时，默认在 RepoDir 同级新建 `<项目目录名>_gx`，例如 RepoDir 为 `D:\hongguo` 时使用 `D:\hongguo_gx`，并按第 5.1 节创建 SMB 共享。此路径是明确规定的自动部署默认值，不使用 Downloads，也不把任意发现的共享当成授权目标。 |
 | DownloadHostIP | 根据到 Hermes 后端的实际路由选择下载机 IPv4；多网卡时核实目标网卡，不能简单取第一条 IP，也不能填 `0.0.0.0`。 |
 | BindAddress / Port | 内网监听默认 `0.0.0.0:17653`；检查端口占用。若是本项目实例先复用/正常退出；若是别的软件，不能杀进程，选择空闲端口并同步全部配置。 |
 | HermesBackend / Profile | 找到真正执行当前会话的后端、账号和 profile。桌面端的 Remote Gateway 名称不是配置文件所在位置。 |
@@ -45,7 +45,7 @@ Get-SmbConnection -ErrorAction SilentlyContinue | Select-Object ServerName,Share
 
 AI 在 WSL 中时，下载端安装、文件路径、进程启动和共享权限检查应转到 Windows PowerShell 执行；先确认 `powershell.exe` 可用并能在目标用户会话运行。不要把 Linux 的 Node/npm 安装结果当成 Windows 的依赖。没有 Windows 执行通道时明确报告，但可以继续准备 Hermes 端配置草稿。
 
-真实共享路径尚未确定时，继续下载源码、安装依赖、验证 FFmpeg 和构建；**不要用本机 Downloads 冒充共享，也不要为此提前开启可提交下载任务的局域网服务。** 最终只需用户补充无法发现的路径/权限，不要重新询问已提供的信息。
+未提供共享路径不再直接视为阻塞：先按第 5.1 节创建默认独立目录及共享。确实没有创建共享的管理员权限，或已有指定共享缺少凭据/权限时，继续下载源码、安装依赖、验证 FFmpeg 和构建；**不要用本机 Downloads 冒充共享，也不要在共享尚未验证可写时提前开启可提交下载任务的局域网服务。** 最终只列出实际缺少的权限或凭据。
 
 ## 2. 安装 Git / Node：优先复用，缺少才安装
 
@@ -208,7 +208,59 @@ if ($LASTEXITCODE -ne 0) { throw 'FFprobe 实际探测失败。' }
 
 ### 5.1 验证真实保存目标
 
-使用运行下载软件的同一 Windows 用户验证 `$DownloadRoot`，通常是 `\\服务器\共享名\子目录`。SMB 密码不得传入 MCP、写进项目或粘贴到日志。共享未授权时不能自动开放 Everyone/Guest；保留这个阻塞项并继续其它不依赖它的步骤。
+使用运行下载软件的同一 Windows 用户验证 `$DownloadRoot`，通常是 `\\服务器\共享名\子目录`。SMB 密码不得传入 MCP、写进项目或粘贴到日志。
+
+**默认自动创建共享：** 没有已有有效共享配置、用户也没有指定目标时，在仓库旁创建 `<项目目录名>_gx`，共享名同目录名；使用实际下载机 IP 构造 UNC，不能把下面的路径推导规则误当成固定磁盘/IP。创建前检查目录是否为重解析点、共享名是否冲突；已存在的非空目录或同路径现有共享不自动放宽 ACL，先确认范围。已有用户指定共享保留原权限。
+
+默认新建的专用空目录可设置 **Everyone 读写（Change / Modify），而不是 FullControl**。这会允许所有通过 Windows SMB 身份验证的用户修改该目录中的文件；仅适合可信内网，防火墙仅放行 Private 网络的 LocalSubnet。不得顺带修改磁盘根目录、父目录或其它共享权限。
+
+**Everyone 不等于匿名访问。** 不自动启用 Guest、关闭密码保护共享、关闭 SMB 签名、允许不安全来宾登录或更改匿名访问全局策略。用户要求真正匿名免密码时单独列为安全策略变更，需要确认 Windows 版本、服务端/客户端策略及跨机验收，不能仅授予 Everyone 后声称已匿名可用。
+
+以下只适用于“无现有保存配置”的默认新建分支，需管理员权限；已有共享分支不得盲目执行：
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$RepoPath = (Get-Item -LiteralPath $RepoDir).FullName
+$ShareName = (Split-Path -Leaf $RepoPath) + '_gx'
+$LocalRoot = Join-Path (Split-Path -Parent $RepoPath) $ShareName
+$ExistingShare = Get-SmbShare -Name $ShareName -ErrorAction SilentlyContinue
+if ($ExistingShare) { throw '默认共享名已存在；先核对路径及权限，不自动覆盖。' }
+if (Test-Path -LiteralPath $LocalRoot) {
+  $Item = Get-Item -LiteralPath $LocalRoot -Force
+  if (-not $Item.PSIsContainer -or ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw '默认保存路径不是普通目录。'
+  }
+  if (@(Get-ChildItem -LiteralPath $LocalRoot -Force).Count) {
+    throw '默认目录非空；先确认内容归属，不自动放宽 ACL。'
+  }
+} else { New-Item -ItemType Directory -Path $LocalRoot | Out-Null }
+if (@(Get-SmbShare | Where-Object { $_.Path -eq $LocalRoot }).Count) {
+  throw '此目录已被其它共享使用；先核对，不自动放宽权限。'
+}
+$Everyone = ([Security.Principal.SecurityIdentifier]'S-1-1-0').Translate([Security.Principal.NTAccount]).Value
+# 只变更该独立空目录；保留原 ACL 供回滚。
+$Acl = Get-Acl -LiteralPath $LocalRoot
+$AclBackup = Join-Path $RepoDir '.local\share-acl-before.sddl'
+if (Test-Path -LiteralPath $AclBackup) { throw 'ACL 备份已存在，先核对上次部署记录。' }
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $AclBackup) | Out-Null
+[IO.File]::WriteAllText($AclBackup, $Acl.Sddl)
+$Rule = New-Object Security.AccessControl.FileSystemAccessRule($Everyone, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+$Acl.AddAccessRule($Rule)
+Set-Acl -LiteralPath $LocalRoot -AclObject $Acl
+try {
+  New-SmbShare -Name $ShareName -Path $LocalRoot -ChangeAccess $Everyone -FolderEnumerationMode AccessBased | Out-Null
+} catch {
+  $Acl.SetSecurityDescriptorSddlForm([IO.File]::ReadAllText($AclBackup))
+  Set-Acl -LiteralPath $LocalRoot -AclObject $Acl
+  throw
+}
+$DownloadRoot = '\\' + $DownloadHostIP + '\' + $ShareName
+Get-SmbShare -Name $ShareName | Select-Object Name,Path
+Get-SmbShareAccess -Name $ShareName | Select-Object AccountName,AccessRight,AccessControlType
+# 后续必须使用该 UNC 做写入→读取→删除探针，不能仅检查本地目录。
+```
+
+如果创建共享权限不足，保留已完成的依赖与构建，只报告所需管理员执行权限。共享创建和 ACL 修改只在这一步使用必要权限，主应用仍以正常桌面用户运行。共享创建失败时恢复本次 ACL；不删除保存目录或用户文件。重复部署优先复用已确认的有效配置，不反复创建共享。
 
 目标子目录不存在、但父共享已连接且用户明确指定该子目录时，可以创建该准确子目录；否则不要随意创建目录或改变目标。Windows UNC **必须令 `requireNetworkMount=false`**，它不是“开启共享”开关；当前实现的 `true` 只检查 Linux/WSL 的 CIFS/SMB/NFS 挂载。
 
