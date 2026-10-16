@@ -1,0 +1,212 @@
+
+> hongguo-downloader@1.73.0-lan.2 test:lan
+> node --test tests/remote-control.test.cjs
+
+TAP version 13
+# Subtest: disabled by default; no token is generated or stored
+ok 1 - disabled by default; no token is generated or stored
+  ---
+  duration_ms: 41.253009
+  type: 'test'
+  ...
+# Subtest: MCP initialization negotiates supported protocol
+ok 2 - MCP initialization negotiates supported protocol
+  ---
+  duration_ms: 139.379892
+  type: 'test'
+  ...
+# Subtest: MCP notifications get 202; GET gets 405
+ok 3 - MCP notifications get 202; GET gets 405
+  ---
+  duration_ms: 33.230727
+  type: 'test'
+  ...
+# Subtest: MCP exposes only the eight specific tools, not arbitrary IPC or deletion
+ok 4 - MCP exposes only the eight specific tools, not arbitrary IPC or deletion
+  ---
+  duration_ms: 31.368031
+  type: 'test'
+  ...
+# Subtest: all endpoints work without Authorization; leftover headers do not gate access
+ok 5 - all endpoints work without Authorization; leftover headers do not gate access
+  ---
+  duration_ms: 51.947185
+  type: 'test'
+  ...
+# Subtest: blocks browser Origin and forged Host without relying on authentication
+ok 6 - blocks browser Origin and forged Host without relying on authentication
+  ---
+  duration_ms: 45.686099
+  type: 'test'
+  ...
+# Subtest: MCP rejects unsupported protocol headers and missing Accept types
+ok 7 - MCP rejects unsupported protocol headers and missing Accept types
+  ---
+  duration_ms: 32.819328
+  type: 'test'
+  ...
+# Subtest: REST status explicitly reports no authentication and LAN scope
+ok 8 - REST status explicitly reports no authentication and LAN scope
+  ---
+  duration_ms: 22.093351
+  type: 'test'
+  ...
+# Subtest: invalid JSON / media types / oversized payloads fail
+ok 9 - invalid JSON / media types / oversized payloads fail
+  ---
+  duration_ms: 42.474506
+  type: 'test'
+  ...
+# Subtest: search/resolve routes use original handlers and hide raw media IDs in episode output
+ok 10 - search/resolve routes use original handlers and hide raw media IDs in episode output
+  ---
+  duration_ms: 11.065776
+  type: 'test'
+  ...
+# Subtest: download submits a job, returns IDs without waiting for media download
+ok 11 - download submits a job, returns IDs without waiting for media download
+  ---
+  duration_ms: 25.443544
+  type: 'test'
+  ...
+# Subtest: simultaneous duplicate request_id is executed once
+ok 12 - simultaneous duplicate request_id is executed once
+  ---
+  duration_ms: 34.383924
+  type: 'test'
+  ...
+# Subtest: request_id conflict fails; idempotency survives restart
+ok 13 - request_id conflict fails; idempotency survives restart
+  ---
+  duration_ms: 20.834654
+  type: 'test'
+  ...
+# Subtest: missing or locked episode rejects entire batch before queue mutation
+ok 14 - missing or locked episode rejects entire batch before queue mutation
+  ---
+  duration_ms: 12.539672
+  type: 'test'
+  ...
+# Subtest: input validation rejects arbitrary URLs, path overrides and duplicate numbers
+ok 15 - input validation rejects arbitrary URLs, path overrides and duplicate numbers
+  ---
+  duration_ms: 7.643583
+  type: 'test'
+  ...
+# Subtest: pagination and allowlisted task serialization
+ok 16 - pagination and allowlisted task serialization
+  ---
+  duration_ms: 26.84004
+  type: 'test'
+  ...
+# Subtest: remote task operations cannot touch a different storage root
+ok 17 - remote task operations cannot touch a different storage root
+  ---
+  duration_ms: 7.077784
+  type: 'test'
+  ...
+# Subtest: stop remains possible when share is disconnected; retry is blocked
+ok 18 - stop remains possible when share is disconnected; retry is blocked
+  ---
+  duration_ms: 42.760505
+  type: 'test'
+  ...
+# Subtest: stop completed task is a no-op; retry active task is a no-op
+ok 19 - stop completed task is a no-op; retry active task is a no-op
+  ---
+  duration_ms: 25.151944
+  type: 'test'
+  ...
+# Subtest: root probe cleans up; absent root is not created
+ok 20 - root probe cleans up; absent root is not created
+  ---
+  duration_ms: 13.022371
+  type: 'test'
+  ...
+# Subtest: rejects path traversal and symlink escapes
+ok 21 - rejects path traversal and symlink escapes
+  ---
+  duration_ms: 14.712067
+  type: 'test'
+  ...
+# Subtest: network mount requirement rejects ordinary local directory
+ok 22 - network mount requirement rejects ordinary local directory
+  ---
+  duration_ms: 14.799667
+  type: 'test'
+  ...
+# Subtest: legacy tokens are removed from disk and status during migration
+ok 23 - legacy tokens are removed from disk and status during migration
+  ---
+  duration_ms: 17.84546
+  type: 'test'
+  ...
+# Subtest: bad reconfiguration preserves listener; public bind addresses are rejected
+ok 24 - bad reconfiguration preserves listener; public bind addresses are rejected
+  ---
+  duration_ms: 13.954569
+  type: 'test'
+  ...
+# Subtest: busy operations prevent reconfiguration
+ok 25 - busy operations prevent reconfiguration
+  ---
+  duration_ms: 7.330084
+  type: 'test'
+  ...
+# Subtest: MCP tool errors are isError=true, and unknown RPC method returns -32601
+ok 26 - MCP tool errors are isError=true, and unknown RPC method returns -32601
+  ---
+  duration_ms: 23.096648
+  type: 'test'
+  ...
+# Subtest: REST tool invocation reaches the same service as MCP
+ok 27 - REST tool invocation reaches the same service as MCP
+  ---
+  duration_ms: 27.18974
+  type: 'test'
+  ...
+# Subtest: completed records do not claim an unavailable file is ready
+ok 28 - completed records do not claim an unavailable file is ready
+  ---
+  duration_ms: 17.235262
+  type: 'test'
+  ...
+# Subtest: LAN peer rules accept private IPv4 and reject public or malformed addresses
+ok 29 - LAN peer rules accept private IPv4 and reject public or malformed addresses
+  ---
+  duration_ms: 0.403399
+  type: 'test'
+  ...
+# Subtest: old token controls are ignored rather than re-enabling authentication
+ok 30 - old token controls are ignored rather than re-enabling authentication
+  ---
+  duration_ms: 20.787754
+  type: 'test'
+  ...
+# Subtest: Host allowlist does not override Origin validation
+ok 31 - Host allowlist does not override Origin validation
+  ---
+  duration_ms: 20.851054
+  type: 'test'
+  ...
+# Subtest: forwarded headers cannot bypass the Host gate
+ok 32 - forwarded headers cannot bypass the Host gate
+  ---
+  duration_ms: 9.36208
+  type: 'test'
+  ...
+# Subtest: config normalization keeps approved settings only
+ok 33 - config normalization keeps approved settings only
+  ---
+  duration_ms: 0.533599
+  type: 'test'
+  ...
+1..33
+# tests 33
+# suites 0
+# pass 33
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1010.235166

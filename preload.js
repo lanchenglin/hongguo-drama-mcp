@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getRemoteSettings: () => ipcRenderer.invoke('get-remote-settings'),
+  saveRemoteSettings: draft => ipcRenderer.invoke('save-remote-settings', draft),
+  testDownloadRoot: () => ipcRenderer.invoke('test-download-root'),
   getPublicDetails: (seriesId, vid) => ipcRenderer.invoke('get-public-details', seriesId, vid),
   getEpisodeComments: options => ipcRenderer.invoke('get-episode-comments', options),
   setStealthMode: enabled => ipcRenderer.invoke('set-stealth-mode', enabled),

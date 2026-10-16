@@ -80,3 +80,8 @@ dist-local/
 HANDOFF.md
 
 .local/
+
+# Local LAN/MCP settings, requests and patch backups
+.lan-mcp-backup/
+remote-control.json
+remote-control.json.requests.json

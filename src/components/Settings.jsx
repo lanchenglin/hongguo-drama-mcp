@@ -4,6 +4,7 @@ import './Settings.css';
 import AppearanceSettings from './AppearanceSettings';
 import ShortcutSettings from './ShortcutSettings';
 import CustomSources from './CustomSources';
+import RemoteControlSettings from './RemoteControlSettings';
 import { Settings, Folder, Check, Globe, X, RefreshCw, AlertCircle } from './icons';
 
 
@@ -182,6 +183,7 @@ function SettingsPage({ active = true, preview = false }) {
       <section className="settings-card" aria-label="外观设置"><AppearanceSettings /></section>
       <ShortcutSettings active={active} />
       <CustomSources active={active} />
+      <RemoteControlSettings active={active} />
       <p className="settings-hint">播放页顶部可开启隐身小窗。鼠标移开时暂停隐藏，移回继续；Esc 或 Dock 可恢复主窗口。</p>
       <fieldset className="settings-card" disabled={saving}>
         <div className="settings-group">

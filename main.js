@@ -29,6 +29,32 @@ const hongguo = require('./src/native/hongguo');
 const { normalizeDownloadQuality, meetsDownloadQuality } = require('./src/native/download-quality');
 const { decryptInWorker } = require('./src/native/decrypt-worker.cjs');
 const store = require('./src/store');
+
+// ===== LAN/MCP extension (1.73.0-lan.2; opt-in, not an upstream release) =====
+const { createRemoteControl } = require('./src/native/remote-control.cjs');
+const { checkStorage } = require('./src/native/remote-storage.cjs');
+const lanHandlers = new Map();
+let remoteControl = null;
+function registerLanHandler(channel, handler) {
+  lanHandlers.set(channel, handler);
+  ipcMain.handle(channel, handler);
+}
+function requireLocalLanCaller(event) {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('仅允许本地主窗口修改远程设置');
+  if (!remoteControl) throw new Error('远程控制尚未初始化或配置文件不可用');
+}
+ipcMain.handle('get-remote-settings', async event => {
+  requireLocalLanCaller(event); return remoteControl.status();
+});
+ipcMain.handle('save-remote-settings', async (event, draft) => {
+  try { requireLocalLanCaller(event); return await remoteControl.reconfigure(draft || {}); }
+  catch (error) { return { success: false, error: error.message }; }
+});
+ipcMain.handle('test-download-root', async event => {
+  try { requireLocalLanCaller(event); return await remoteControl.rootCheck(); }
+  catch (error) { return { success: false, error: error.message }; }
+});
+
 const watchHistory = require('./src/native/watch-history');
 const { fitWindowBounds } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
@@ -665,6 +691,7 @@ async function executeHongguoDownload(task) {
     // Old and retried tasks retain their original policy, independent of new defaults.
     const quality = normalizeDownloadQuality(task.downloadQuality);
     const root = String(settings.root || '').trim() || app.getPath('downloads');
+    await checkStorage(root, { requireMount: remoteControl?.requireNetworkMount() });
     const downloadDir = task.customDir || seriesDownloadDir(root, hongguoInfo?.series_id, series_title);
     fs.mkdirSync(downloadDir, { recursive: true });
     const finalPath = task.savePath || path.join(downloadDir, filename);
@@ -1080,7 +1107,7 @@ ipcMain.handle('browse-list', (_event, options) =>
   require(String(options?.source).startsWith('custom:') ? './src/native/custom-source' : options?.source === 'hema' ? './src/native/hema'
     : options?.source === 'xifan' ? './src/native/xifan' : './src/native/catalog').browseList(options));
 
-ipcMain.handle('search-series', async (event, keyword, options = {}) => {
+registerLanHandler('search-series', async (event, keyword, options = {}) => {
   const kw = String(keyword || '').trim();
   if (!kw) return { success: false, error: '请输入搜索关键词' };
   try {
@@ -1095,7 +1122,7 @@ ipcMain.handle('search-series', async (event, keyword, options = {}) => {
 });
 
 // 搜索选中某部剧后，拉取完整分集并登记档案
-ipcMain.handle('search-resolve', async (event, seriesId) => {
+registerLanHandler('search-resolve', async (event, seriesId) => {
   try {
     if (!seriesId) return { success: false, error: '缺少 series_id' };
     const data = await hongguo.fetchEpisodeList(String(seriesId));
@@ -2644,7 +2671,8 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover, quality
   const root = (settings.root && String(settings.root).trim()) ? String(settings.root).trim() : app.getPath('downloads');
   const cleanSeriesTitle = sanitizeFolderName(seriesTitle) || '红果短剧';
   const downloadDir = seriesDownloadDir(root, seriesId, cleanSeriesTitle);
-  try { fs.mkdirSync(downloadDir, { recursive: true }); } catch (_) {}
+  await checkStorage(root, { requireMount: remoteControl?.requireNetworkMount() });
+  await fsp.mkdir(downloadDir, { recursive: true });
 
   const batchId = 'hongguobatch_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
   const firstCover = cover || (episodes[0] && episodes[0].cover) || '';
@@ -2739,7 +2767,7 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover, quality
   return created;
 }
 
-ipcMain.handle('hongguo-download-batch', async (event, payload) => {
+registerLanHandler('hongguo-download-batch', async (event, payload) => {
   try {
     const { seriesId, seriesTitle, episodes, quality } = payload || {};
     if (!Array.isArray(episodes) || episodes.length === 0) {
@@ -2890,6 +2918,15 @@ ipcMain.handle('save-settings', async (event, settings) => {
     const wasCheckingUpdates = getCurrentSettings().app_updates_enabled !== false;
     const merged = { ...getDefaultSettings(), ...(settings || {}), custom_sources:getCurrentSettings().custom_sources };
     merged.download_quality = normalizeDownloadQuality(merged.download_quality);
+    if (String(merged.root || '') !== String(getCurrentSettings().root || '')) {
+      if (remoteControl?.isBusy() || downloadTasks.some(t => ['pending', 'downloading'].includes(t.status))) {
+        throw new Error('请先停止等待中/进行中的任务并完成接口请求，再切换保存目录。旧任务不会自动迁移。');
+      }
+      await checkStorage(merged.root, { requireMount: remoteControl?.requireNetworkMount() });
+      if (remoteControl?.isBusy() || downloadTasks.some(t => ['pending', 'downloading'].includes(t.status))) {
+        throw new Error('检查目录期间出现新任务，请停止任务后重试保存。');
+      }
+    }
     store.saveSettings(merged);
     if (wasCheckingUpdates !== (merged.app_updates_enabled !== false)) {
       sendToRenderer('app-update-preference', merged.app_updates_enabled !== false);
@@ -3310,7 +3347,7 @@ ipcMain.handle('delete-all-downloaded', async () => {
 });
 
 
-ipcMain.handle('stop-download', async (event, taskId) => {
+registerLanHandler('stop-download', async (event, taskId) => {
   const task = downloadTasks.find((t) => t.id === taskId);
   if (!task) return { success: false, error: '任务不存在' };
 
@@ -3330,7 +3367,7 @@ ipcMain.handle('stop-download', async (event, taskId) => {
   return { success: true };
 });
 
-ipcMain.handle('retry-task', async (event, taskId) => {
+registerLanHandler('retry-task', async (event, taskId) => {
   const task = downloadTasks.find((t) => t.id === taskId);
   if (!task) return { success: false, error: '任务不存在' };
   if (!['failed', 'stopped'].includes(task.status) && !(task.status === 'completed' && !hasCompleteTaskFile(task))) return { success: false, error: '任务仍在进行中或已完成' };
@@ -3386,7 +3423,7 @@ ipcMain.handle('pause-all', async () => ({ success: true, count: pauseAllTasks()
 ipcMain.handle('resume-all', async () => ({ success: true, count: resumeAllTasks() }));
 
 // 队列实时状态（供界面显示「进行中 x/并发上限」）
-ipcMain.handle('get-queue-status', async () => ({
+registerLanHandler('get-queue-status', async () => ({
   active: activeDownloads,
   queued: downloadQueue.length,
   maxConcurrent: MAX_CONCURRENT_DOWNLOADS,
@@ -3590,6 +3627,25 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   // 代理必须在创建窗口、发起任何请求之前生效
   await applyProxySettings(settings);
 
+  // Reuse the original handlers/queue. Never expose arbitrary IPC channels.
+  remoteControl = createRemoteControl({
+    configFile: path.join(app.getPath('userData'), 'remote-control.json'),
+    appVersion: APP_VERSION,
+    getRoot: () => getCurrentSettings().root || app.getPath('downloads'),
+    getTaskSnapshot: () => downloadTasks.slice(),
+    destinationFor: (data, ep) => path.join(
+      seriesDownloadDir(getCurrentSettings().root || app.getPath('downloads'), data.series_id, data.series_title),
+      uniqueEpisodeFilename(getCurrentSettings(), sanitizeFolderName(data.series_title) || '红果短剧', ep)
+    ),
+    invoke: (channel, ...args) => {
+      const handler = lanHandlers.get(channel);
+      if (!handler) throw new Error('远程接口未开放此操作');
+      return handler(null, ...args);
+    },
+  });
+  try { await remoteControl.start(); }
+  catch (error) { console.error('[LAN/MCP] 启动失败:', error.message); }
+
   // 启动后自动接着跑「等待中」的任务（上次未下完的队列），无需手动点启动
   // Automatic source retries scheduled before the app closed continue on the same schedule.
   for (const task of downloadTasks) if (task.status === 'failed' && task.retryAt) armSourceRetry(task);
@@ -3648,3 +3704,5 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+app.on('before-quit', () => { if (remoteControl) void remoteControl.stop().catch(() => {}); });
