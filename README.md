@@ -8,6 +8,12 @@
 - 访问方式：**内网免令牌，不需要 API Key、Bearer Token 或 Authorization 请求头。**
 - 默认：远程接口关闭，监听 `127.0.0.1:17653`；在设置中启用并允许局域网设备连接。
 
+## 让 AI 自动部署
+
+把仓库交给本机 Hermes / Codex / Claude Code，要求先读取并执行 [AI_DEPLOY.md](AI_DEPLOY.md)。文档包含环境发现、Git/Node 安装、**自动下载并校验 FFmpeg 与 FFprobe**、共享目录测试、备份后自动写入配置、启动入口、局域网验证和实际 Hermes 接入，不再要求用户手工准备 EXE。
+
+可直接复制 [AI 部署指令](AI_DEPLOY_PROMPT.txt)。真实共享路径/凭据与后端访问权限不能凭空推断；可自动探测的部分由 AI 完成，无法取得的必需信息在报告中明确列出。文档不是一条命令运行的安装器，也不代表已在你的机器完成部署。
+
 ## 快速运行（Windows 下载机）
 
 安装 Git、Node.js 22.12+（建议 Node 22 LTS）及 npm。执行：
@@ -21,7 +27,7 @@ npm run build:react
 npm start
 ```
 
-真实下载和视频校验需要 `ffmpeg.exe` 与 `ffprobe.exe`，请放在 `build\ffmpeg\` 中或系统 PATH 中。FFmpeg 二进制不提交 Git，许可声明保留在仓库中。源码运行不要求 Python；上一版的补丁应用步骤已不再需要。
+真实下载和视频校验需要 `ffmpeg.exe` 与 `ffprobe.exe`；[AI 自动部署文档第 4 节](AI_DEPLOY.md)提供自动下载、SHA-256 校验、复制到 `build\ffmpeg\` 和实际编码/探测测试的完整命令，也支持复用可信的已安装版本。FFmpeg 二进制不提交 Git，许可声明保留在仓库中。源码运行不要求 Python；上一版的补丁应用步骤已不再需要。
 
 软件仍依赖 Electron 桌面环境，不是 Docker、Windows 服务或无界面 Linux 服务。下载机上应保持软件运行，最小化即可；完全退出应用会停止 MCP。**这次没有提供编译好的 EXE，也没有部署到你的电脑。**
 
