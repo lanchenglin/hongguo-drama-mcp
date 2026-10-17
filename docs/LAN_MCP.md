@@ -40,6 +40,33 @@
 
 真实数字 ID 使用 JSON 字符串避免精度丢失。除红果数字 ID 外，支持原适配器提供的 hema/xifan ID；不接受任意 URL 或自定义来源地址。提交 ID、任务 ID、下载完成是不同概念。下载提交不等待视频完成；通过 list_downloads 轮询。
 
+### 按任务查询（BHSP 等客户端）
+
+`GET /api/tools` 或 MCP `tools/list` 可读取当前运行进程的工具 schema。仍然只有原来的 8 个工具；`list_downloads` 新增可选字符串 `task_id`，不改变省略该字段的调用。
+
+普通 JSON API 使用 `POST /api/call`（`Content-Type: application/json`）：
+
+```json
+{
+  "name": "list_downloads",
+  "arguments": {
+    "task_id": "从提交结果 tasks[].id 获取的任务ID",
+    "offset": 0,
+    "limit": 1
+  }
+}
+```
+
+MCP 使用 `tools/call`，其 `params` 就是上面的对象；检查 `result.isError` 后解析 `result.content[0].text` 中的 JSON。
+
+- `task_id` 是不透明标识符，按原值、区分大小写精确匹配，不做截断、去空格或路径解析。不能用文件路径替代任务 ID，也不支持指定任意读取路径；不匹配的路径字符串只会得到空结果。
+- 可与 `series_id` 一起传入，两个条件取交集。未知 ID、系列不匹配或当前保存根目录之外的任务返回 `total: 0, tasks: [], next_offset: null`，不是查询错误。
+- `offset` 默认 0，`limit` 默认 50、最大 100；`total` 和 `next_offset` 均基于过滤后的列表。偏移超过匹配列表时返回空 `tasks`，但 `total` 仍是匹配总数。
+- 查询不会提交、停止或重试下载。已完成记录仍核验文件和目录边界：只有普通文件且大小大于 100 KiB 才标记 `file_available: true`；文件缺失、异常或符号链接越界时返回 `status: file_unavailable`，保留 `recorded_status: completed`，不改写任务记录。
+- 搜索、解析及任务输出中存在的 `series_id` 使用字符串；19 位数字 ID 必须从源头保留字符串，不经 `Number` 转换。历史任务缺少系列元数据时仍可省略或返回 null；若上游已经将长 ID 转成浮点数，本接口无法恢复丢失的精度。
+
+**源码更新不会热加载到正在运行的 Electron 主进程。**需要由维护者在安全时机重启软件，才能加载新的筛选逻辑和 schema；重启前通过 `/api/tools` 确认旧进程能力，不要直接发送不受支持的字段。兼容旧进程的客户端可继续按 `series_id` 分页列出，再在客户端按 `tasks[].id` 精确匹配。本次接口修改和测试不要求立即重启或执行真实下载。
+
 同一 request_id 相同参数复用结果，不同参数拒绝；最多保留 500 条成功记录，保存到独立 `.requests.json`。这不是跨所有崩溃场景的永久 exactly-once 保证，结果不确定时先查队列。锁定或缺失分集导致整批拒绝，应明确选择可用集号，不隐式跳过。
 
 ## 内网免认证安全约束
@@ -67,7 +94,7 @@
 - `src/components/RemoteControlSettings.jsx`：桌面远程设置；没有令牌输入或轮换按钮。
 - `main.js`：注册白名单业务 handler，复用原始下载队列，生命周期启动/关闭。
 - `preload.js`：仅为本地窗口提供远程设置 IPC。
-- `tests/remote-control.test.cjs`：33 个测试；媒体业务使用模拟适配器。
+- `tests/remote-control.test.cjs`：41 个测试；媒体业务使用模拟适配器，覆盖精确任务筛选、分页、系列 ID 字符串和完成文件核验，不触发真实下载。
 
 修改后运行 `npm run test:lan`、`npm run build:react`。不应把依赖、视频、userData、SMB 凭据、密钥或 `.lan-mcp-backup` 提交到仓库。源码许可与原有媒体限制保持不变。
 

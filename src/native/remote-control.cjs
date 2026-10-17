@@ -24,7 +24,7 @@ const TOOLS = [
     series_id: str(), episode_numbers: { type: 'array', minItems: 1, maxItems: 500, uniqueItems: true, items: { type: 'integer', minimum: 1, maximum: 10000 } },
     quality: { type: 'string', enum: ['auto', '720p', '1080p'] }, request_id: str(100)
   }, ['series_id', 'episode_numbers', 'request_id']), false, true),
-  tool('list_downloads', '列出当前保存根目录下的任务，返回任务状态、进度、路径和错误；结果分页。', schema({ series_id: str(), offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 100 } })),
+  tool('list_downloads', '列出当前保存根目录下的任务；可按 task_id 精确筛选，与 series_id 同时使用时取交集；返回状态、进度、路径和错误，结果分页。', schema({ task_id: str(), series_id: str(), offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 100 } })),
   tool('queue_status', '查询整个桌面应用的当前活动任务数、排队数和并发上限。', schema()),
   tool('stop_download', '停止单个正在等待或下载的任务；保留文件及任务记录。', schema({ task_id: str() }, ['task_id']), false),
   tool('retry_download', '重新排队当前根目录内的一个失败或已停止任务，不是保证从字节断点续传。', schema({ task_id: str() }, ['task_id']), false),
@@ -90,7 +90,8 @@ async function atomicJSON(file, value) {
 }
 function serializeTask(t) {
   // Explicit allowlist avoids exposing signed CDN URLs, cookies, or runtime handles.
-  return { id: t.id, series_id: t.hongguoInfo?.series_id, episode: t.hongguoInfo?.vid_index, title: t.title,
+  const id = t.hongguoInfo?.series_id;
+  return { id: t.id, series_id: id == null ? id : String(id), episode: t.hongguoInfo?.vid_index, title: t.title,
     status: t.status, progress: t.progress, receivedBytes: t.receivedBytes, totalBytes: t.totalBytes,
     path: t.savePath, quality: t.actualQuality || t.downloadQuality, error: t.error ? safeError(t.error) : null };
 }
@@ -156,14 +157,15 @@ function createRemoteControl({ configFile, invoke, getRoot, getTaskSnapshot, des
     if (name === 'resolve_series') {
       const response = await rawInvoke('search-resolve', seriesId(args.series_id));
       const data = response.data;
-      return { success: true, series_id: data.series_id, title: data.series_title,
+      return { success: true, series_id: String(data.series_id), title: data.series_title,
         episodes: (data.episodes || []).map(e => ({ episode: e.vid_index, title: e.title || '', locked: !!e.locked })) };
     }
     if (name === 'queue_status') return rawInvoke('get-queue-status');
     if (name === 'storage_status') return rootCheck();
     if (name === 'list_downloads') {
       if (args.series_id) seriesId(args.series_id);
-      const tasks = snapshots().filter(t => !args.series_id || String(t.hongguoInfo?.series_id) === args.series_id);
+      const tasks = snapshots().filter(t => (!args.task_id || t.id === args.task_id)
+        && (!args.series_id || String(t.hongguoInfo?.series_id) === args.series_id));
       const offset = args.offset || 0, limit = args.limit || 50;
       return { total: tasks.length, offset, next_offset: offset + limit < tasks.length ? offset + limit : null,
         tasks: await Promise.all(tasks.slice(offset, offset + limit).map(async task => {

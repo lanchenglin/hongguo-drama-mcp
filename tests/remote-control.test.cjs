@@ -122,6 +122,14 @@ test('search/resolve routes use original handlers and hide raw media IDs in epis
   const a = await f.api.call('search_series', { keyword: '测试剧' }); assert.equal(a.results.length, 1);
   const b = await f.api.call('resolve_series', { series_id: '1234' }); assert.equal(b.episodes.length, 3); assert.equal(b.episodes[0].vid, undefined);
 });
+test('resolve_series returns string IDs without rounding long or prefixed IDs', async t => {
+  const f = await fixture(t);
+  for (const id of [1234, '1234567890123456789', 'hema:episode_1', 'xifan:series-2']) {
+    f.data.series_id = id;
+    const result = await f.api.call('resolve_series', { series_id: String(id) });
+    assert.equal(result.series_id, String(id));
+  }
+});
 test('download submits a job, returns IDs without waiting for media download', async t => {
   const f = await fixture(t), r = await f.api.call('download_episodes', batch());
   assert.equal(r.count, 2); assert.equal(r.tasks[0].id, 'task1'); assert.equal(r.tasks[0].status, 'pending');
@@ -158,6 +166,122 @@ test('pagination and allowlisted task serialization', async t => {
   f.tasks[0].secret = SECRET; f.tasks[0].writer = { circular: null }; f.tasks[0].writer.circular = f.tasks[0].writer;
   const list = await f.api.call('list_downloads', { limit: 1 });
   assert.equal(list.total, 2); assert.equal(list.next_offset, 1); assert.equal(JSON.stringify(list).includes(SECRET), false);
+});
+test('list_downloads exposes optional read-only task_id filtering over MCP and REST', async t => {
+  const f = await fixture(t);
+  f.tasks.push(...['task1', 'task10'].map(id => ({ id, savePath: path.join(f.root, id + '.mp4'),
+    status: 'pending', hongguoInfo: { series_id: '1234' } })));
+  const tools = (await (await f.rpc('tools/list')).json()).result.tools;
+  assert.equal(tools.length, 8);
+  const spec = tools.find(tool => tool.name === 'list_downloads');
+  assert.equal(spec.inputSchema.properties.task_id?.type, 'string');
+  assert.equal(spec.inputSchema.required.includes('task_id'), false);
+  assert.equal(spec.annotations.readOnlyHint, true);
+  assert.deepEqual((await (await f.request('/api/tools')).json()).tools, tools);
+  const rpc = await (await f.rpc('tools/call', { name: 'list_downloads', arguments: { task_id: 'task1', limit: 1 } })).json();
+  assert.equal(rpc.result.isError, false);
+  const result = JSON.parse(rpc.result.content[0].text);
+  assert.equal(result.total, 1); assert.equal(result.offset, 0); assert.equal(result.next_offset, null);
+  assert.deepEqual(result.tasks.map(task => task.id), ['task1']);
+  const rest = await f.request('/api/call', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'list_downloads', arguments: { task_id: 'task1' } }) });
+  assert.equal(rest.status, 200); assert.deepEqual(await rest.json(), result);
+  assert.deepEqual(f.calls, []); assert.ok(f.tasks.every(task => task.status === 'pending'));
+});
+test('task serialization returns string series IDs and preserves missing metadata', async t => {
+  const f = await fixture(t);
+  for (const id of [1234, '1234567890123456789', 'hema:episode_1', 'xifan:series-2', null, undefined]) {
+    f.tasks.splice(0, f.tasks.length, { id: 'task1', savePath: path.join(f.root, '1.mp4'),
+      status: 'pending', hongguoInfo: { series_id: id } });
+    const result = await f.api.call('list_downloads', { task_id: 'task1' });
+    assert.equal(result.tasks[0].series_id, id == null ? id : String(id));
+  }
+  f.tasks[0].hongguoInfo = undefined;
+  assert.equal((await f.api.call('list_downloads', {})).tasks[0].series_id, undefined);
+});
+test('task_id filter returns empty for unknown, partial, case-changed or path values', async t => {
+  const f = await fixture(t);
+  const savePath = path.join(f.root, 'task1.mp4');
+  f.tasks.push({ id: 'task1', savePath, status: 'pending', hongguoInfo: { series_id: '1234' } });
+  for (const task_id of ['unknown', 'task', 'TASK1', ' task1 ', savePath, '../task1.mp4']) {
+    assert.deepEqual(await f.api.call('list_downloads', { task_id }), { total: 0, offset: 0, next_offset: null, tasks: [] });
+  }
+  for (const task_id of [1, null, {}, [], '', 'a'.repeat(129), 'task1\n']) {
+    await assert.rejects(f.api.call('list_downloads', { task_id }), /参数/);
+  }
+  await assert.rejects(f.api.call('list_downloads', { path: savePath }), /参数/);
+  assert.deepEqual(f.calls, []);
+});
+test('task_id and series_id intersect before pagination without changing unfiltered pages', async t => {
+  const f = await fixture(t);
+  f.tasks.push(...[1234, 5678, 1234].map((id, index) => ({ id: 'task' + index,
+    savePath: path.join(f.root, index + '.mp4'), status: 'pending', hongguoInfo: { series_id: id } })));
+  const matched = await f.api.call('list_downloads', { task_id: 'task2', series_id: '1234', limit: 1 });
+  assert.equal(matched.total, 1); assert.equal(matched.next_offset, null);
+  assert.deepEqual(matched.tasks.map(task => task.id), ['task2']);
+  assert.deepEqual(await f.api.call('list_downloads', { task_id: 'task2', series_id: '5678' }),
+    { total: 0, offset: 0, next_offset: null, tasks: [] });
+  assert.deepEqual(await f.api.call('list_downloads', { task_id: 'task2', offset: 1, limit: 1 }),
+    { total: 1, offset: 1, next_offset: null, tasks: [] });
+  await assert.rejects(f.api.call('list_downloads', { task_id: 'task2', series_id: '../' }), /series_id/);
+  const first = await f.api.call('list_downloads', { limit: 1 });
+  assert.equal(first.total, 3); assert.equal(first.offset, 0); assert.equal(first.next_offset, 1);
+  assert.deepEqual(first.tasks.map(task => task.id), ['task0']);
+  const next = await f.api.call('list_downloads', { offset: 1, limit: 1 });
+  assert.equal(next.total, 3); assert.equal(next.offset, 1); assert.equal(next.next_offset, 2);
+  assert.deepEqual(next.tasks.map(task => task.id), ['task1']);
+  const series = await f.api.call('list_downloads', { series_id: '1234', limit: 1 });
+  assert.equal(series.total, 2); assert.equal(series.next_offset, 1);
+  const last = await f.api.call('list_downloads', { series_id: '1234', offset: 1, limit: 1 });
+  assert.equal(last.total, 2); assert.equal(last.next_offset, null);
+  assert.deepEqual(last.tasks.map(task => task.id), ['task2']);
+});
+test('task_id filtering remains confined to the current storage root', async t => {
+  const f = await fixture(t);
+  f.tasks.push(
+    { id: 'outside', savePath: path.join(f.dir, 'other.mp4'), status: 'completed' },
+    { id: 'sibling', savePath: path.join(f.root + '-other', '1.mp4'), status: 'pending' },
+    { id: 'traversal', savePath: path.join(f.root, '..', 'escape.mp4'), status: 'pending' },
+    { id: 'no-path', status: 'pending' }
+  );
+  for (const task of f.tasks) {
+    assert.deepEqual(await f.api.call('list_downloads', { task_id: task.id }),
+      { total: 0, offset: 0, next_offset: null, tasks: [] });
+  }
+  assert.deepEqual(f.calls, []);
+});
+test('task_id filtering still verifies completed file availability without changing records', async t => {
+  const f = await fixture(t);
+  const savePath = path.join(f.root, '1.mp4');
+  f.tasks.push({ id: 'task1', savePath, status: 'completed', hongguoInfo: { series_id: '1234' } });
+  const read = async () => (await f.api.call('list_downloads', { task_id: 'task1' })).tasks[0];
+  let result = await read();
+  assert.equal(result.status, 'file_unavailable'); assert.equal(result.file_available, false);
+  assert.equal(result.recorded_status, 'completed'); assert.ok(result.file_error);
+  await fs.writeFile(savePath, Buffer.alloc(102400));
+  result = await read();
+  assert.equal(result.status, 'file_unavailable'); assert.equal(result.file_available, false);
+  await fs.writeFile(savePath, Buffer.alloc(102401));
+  result = await read();
+  assert.equal(result.status, 'completed'); assert.equal(result.file_available, true);
+  assert.equal(result.file_size, 102401); assert.equal(result.recorded_status, 'completed');
+  await fs.unlink(savePath); await fs.mkdir(savePath);
+  result = await read();
+  assert.equal(result.status, 'file_unavailable'); assert.equal(result.file_available, false);
+  assert.equal(f.tasks[0].status, 'completed'); assert.deepEqual(f.calls, []);
+});
+test('task_id filtering does not report completed files through an escaping junction as available', async t => {
+  const f = await fixture(t);
+  const outside = path.join(f.dir, 'outside'); await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, '1.mp4'), Buffer.alloc(102401));
+  const link = path.join(f.root, 'linked');
+  try { await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (e) { if (e.code === 'EPERM') return t.skip('OS disallows symlink creation'); throw e; }
+  f.tasks.push({ id: 'linked', savePath: path.join(link, '1.mp4'), status: 'completed' });
+  const result = await f.api.call('list_downloads', { task_id: 'linked' });
+  assert.equal(result.tasks[0].status, 'file_unavailable'); assert.equal(result.tasks[0].file_available, false);
+  assert.equal(result.tasks[0].recorded_status, 'completed'); assert.match(result.tasks[0].file_error, /越出/);
+  assert.equal(f.tasks[0].status, 'completed'); assert.deepEqual(f.calls, []);
 });
 test('remote task operations cannot touch a different storage root', async t => {
   const f = await fixture(t);
